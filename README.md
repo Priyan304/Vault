@@ -1,42 +1,80 @@
 # Vault
 
-**Vault** is a local-first personal knowledge and resource management platform. Save, organize, search, and manage resources, code snippets, personal notes, digital diary entries, and bookmarks in a clean, distraction-free interface.
+> **A little digital space for everything worth keeping. 🔐**
 
-## Features
+Vault is a personal digital space for saving, organizing, searching, and revisiting resources, notes, code snippets, bookmarks, and diary entries.
 
-- **Resource Management**: Bookmarks, articles, documentation, videos, and repositories with rich metadata.
-- **Personal Notes**: Markdown-supported note-taking with instant preview and syntax styling.
-- **Code Snippets**: Multi-language snippet library with syntax highlighting and one-click copy.
-- **Digital Diary**: Daily reflections, mood tracking, and thoughts catalog.
-- **Tagging & Filtering**: Categorize entries with customizable tags and instant full-text search.
-- **Command Palette (`⌘K` / `Ctrl+K`)**: Quick jump to resources, views, or creation modals.
-- **Local Persistence**: Zero backend configuration required; all data stays private and persists locally.
-- **Schema & RLS Educational Blueprint**: Interactive PostgreSQL schema reference with Row Level Security policies.
+This started as a personal learning project and is currently evolving from a local-first prototype into a full-stack application.
 
-## Getting Started
+##  Features
+
+- **Resource Management** — Save bookmarks, articles, documentation, videos, repositories, and more.
+- **Personal Notes** — Write and organize notes with Markdown support.
+- **Code Snippets** — Keep reusable code snippets organized by language.
+- **Digital Diary** — A private space for daily thoughts, reflections, and moods.
+- **Tags & Filtering** — Organize content and quickly find what you're looking for.
+- **Command Palette** — Quickly navigate around the application with `⌘K` / `Ctrl+K`.
+- **Local Persistence** — Data currently persists locally in the browser using `localStorage`.
+- **Mock Authentication** — Separate local data between different accounts during development.
+
+## Tech Stack
+
+- Next.js
+- TypeScript
+- Tailwind CSS
+- shadcn/ui
+- localStorage *(current prototype)*
+
+### Planned
+
+- Supabase PostgreSQL
+- Supabase Authentication
+- Row Level Security (RLS)
+- Vercel deployment
+
+##  Project Status
+
+**Under Development**
+
+Vault is currently a functional local-first prototype.
+
+The current version stores authentication state and application data in the browser using `localStorage`. A database-backed version is planned as the next major stage of development.
+
+The project is being built incrementally to explore:
+
+- Authentication
+- PostgreSQL databases
+- Data relationships
+- Authorization
+- Row Level Security
+- Secure application architecture
+- Production deployment
+
+##  Getting Started
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v18+)
+- Node.js v18+
 - npm
 
-### Installation & Running Locally
+### Installation
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-2. Start the development server:
-   ```bash
-   npm run dev
-   ```
-
-3. Open your browser and navigate to `http://localhost:3000`.
-
-### Building for Production
+Clone the repository:
 
 ```bash
-npm run build
-npm run preview
-```
+git clone https://github.com/Priyan304/Vault.git
+cd Vault
+Reset Local Data
+
+Vault currently stores authentication and application data in your browser's `localStorage`.
+
+To completely reset the local application:
+
+1. Open the app at `http://localhost:3000`
+2. Open Developer Tools with `F12`
+3. Go to **Console**
+4. Run:
+
+```javascript
+localStorage.clear();
+location.reload();
