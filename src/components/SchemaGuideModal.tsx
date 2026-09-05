@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Check,
   Code2,
@@ -10,15 +10,29 @@ import {
   X,
 } from 'lucide-react';
 import { POSTGRES_SCHEMA_SQL, db } from '../lib/storage';
+import { Resource, Tag } from '../types';
 
 interface SchemaGuideModalProps {
   isOpen: boolean;
   onClose: () => void;
+  userId: string;
 }
 
-export const SchemaGuideModal: React.FC<SchemaGuideModalProps> = ({ isOpen, onClose }) => {
+export const SchemaGuideModal: React.FC<SchemaGuideModalProps> = ({ isOpen, onClose, userId }) => {
   const [activeTab, setActiveTab] = useState<'sql' | 'tables' | 'rls' | 'steps'>('sql');
   const [copied, setCopied] = useState(false);
+  const [rawTables, setRawTables] = useState<{
+    resources: Resource[];
+    tags: Tag[];
+    resource_tags: { resource_id: string; tag_id: string }[];
+  }>({ resources: [], tags: [], resource_tags: [] });
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'tables') return;
+    db.getLiveSnapshot(userId)
+      .then(setRawTables)
+      .catch((err) => console.error('Failed to load live snapshot', err));
+  }, [isOpen, activeTab, userId]);
 
   if (!isOpen) return null;
 
@@ -27,8 +41,6 @@ export const SchemaGuideModal: React.FC<SchemaGuideModalProps> = ({ isOpen, onCl
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
-  const rawTables = db.getRawTables();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
@@ -66,44 +78,40 @@ export const SchemaGuideModal: React.FC<SchemaGuideModalProps> = ({ isOpen, onCl
         <div className="flex items-center gap-2 px-6 py-2.5 border-b border-[#262626] bg-[#0A0A0A]">
           <button
             onClick={() => setActiveTab('sql')}
-            className={`px-3 py-1.5 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${
-              activeTab === 'sql'
-                ? 'bg-[#1A1A1A] border border-[#333] text-white font-semibold shadow-sm'
-                : 'text-[#666] hover:text-[#A1A1A1]'
-            }`}
+            className={`px-3 py-1.5 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${activeTab === 'sql'
+              ? 'bg-[#1A1A1A] border border-[#333] text-white font-semibold shadow-sm'
+              : 'text-[#666] hover:text-[#A1A1A1]'
+              }`}
           >
             <Code2 className="w-3.5 h-3.5" />
             PostgreSQL DDL & Schema
           </button>
           <button
             onClick={() => setActiveTab('tables')}
-            className={`px-3 py-1.5 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${
-              activeTab === 'tables'
-                ? 'bg-[#1A1A1A] border border-[#333] text-white font-semibold shadow-sm'
-                : 'text-[#666] hover:text-[#A1A1A1]'
-            }`}
+            className={`px-3 py-1.5 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${activeTab === 'tables'
+              ? 'bg-[#1A1A1A] border border-[#333] text-white font-semibold shadow-sm'
+              : 'text-[#666] hover:text-[#A1A1A1]'
+              }`}
           >
             <Table className="w-3.5 h-3.5" />
             Live Table Inspector
           </button>
           <button
             onClick={() => setActiveTab('rls')}
-            className={`px-3 py-1.5 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${
-              activeTab === 'rls'
-                ? 'bg-[#1A1A1A] border border-[#333] text-white font-semibold shadow-sm'
-                : 'text-[#666] hover:text-[#A1A1A1]'
-            }`}
+            className={`px-3 py-1.5 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${activeTab === 'rls'
+              ? 'bg-[#1A1A1A] border border-[#333] text-white font-semibold shadow-sm'
+              : 'text-[#666] hover:text-[#A1A1A1]'
+              }`}
           >
             <ShieldCheck className="w-3.5 h-3.5" />
             Row Level Security (RLS)
           </button>
           <button
             onClick={() => setActiveTab('steps')}
-            className={`px-3 py-1.5 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${
-              activeTab === 'steps'
-                ? 'bg-[#1A1A1A] border border-[#333] text-white font-semibold shadow-sm'
-                : 'text-[#666] hover:text-[#A1A1A1]'
-            }`}
+            className={`px-3 py-1.5 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${activeTab === 'steps'
+              ? 'bg-[#1A1A1A] border border-[#333] text-white font-semibold shadow-sm'
+              : 'text-[#666] hover:text-[#A1A1A1]'
+              }`}
           >
             <Layers className="w-3.5 h-3.5" />
             Supabase Connection Steps
@@ -297,7 +305,7 @@ export const SchemaGuideModal: React.FC<SchemaGuideModalProps> = ({ isOpen, onCl
                   <strong className="text-white">Run the SQL Migration:</strong> Open the SQL Editor in Supabase, paste the SQL from the first tab, and click <em>Run</em>.
                 </li>
                 <li className="p-3 rounded-lg border border-[#262626] bg-[#1A1A1A]">
-                  <strong className="text-white">Add Environment Variables:</strong> Set <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in your <code>.env.local</code> file.
+                  <strong className="text-white">Add Environment Variables:</strong> Copy <code>.env.example</code> to <code>.env</code> and set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> with your project's values.
                 </li>
                 <li className="p-3 rounded-lg border border-[#262626] bg-[#1A1A1A]">
                   <strong className="text-white">Enable Email Auth:</strong> In Supabase Authentication settings, confirm Email/Password provider is enabled.

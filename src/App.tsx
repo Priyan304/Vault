@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   AllResourcesView,
 } from './components/AllResourcesView';
@@ -16,7 +16,7 @@ import { Sidebar } from './components/Sidebar';
 import { TagsView } from './components/TagsView';
 import { AuthProvider, useAuth } from './lib/auth';
 import { db } from './lib/storage';
-import { Resource, ResourceType, SortOption, ViewMode } from './types';
+import { Resource, ResourceType, SortOption, Tag, ViewMode } from './types';
 
 function VaultMain() {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -39,8 +39,70 @@ function VaultMain() {
   const [isSchemaGuideOpen, setIsSchemaGuideOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Local data trigger for re-renders
+  // Remote data state — replaces the old synchronous localStorage reads.
+  const [isDataLoading, setIsDataLoading] = useState(true);
+  const [allUserResources, setAllUserResources] = useState<Resource[]>([]);
+  const [viewResources, setViewResources] = useState<Resource[]>([]);
+  const [availableTags, setAvailableTags] = useState<(Tag & { count: number })[]>([]);
+  const [stats, setStats] = useState({
+    totalResources: 0,
+    totalSnippets: 0,
+    totalNotes: 0,
+    totalDiary: 0,
+    totalBookmarks: 0,
+    totalFavorites: 0,
+    totalTags: 0,
+  });
   const [dataVersion, setDataVersion] = useState(0);
+
+  // Base data: everything the user owns, plus tags and stats.
+  // Re-fetched whenever the signed-in user changes or a mutation bumps dataVersion.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    setIsDataLoading(true);
+
+    Promise.all([db.getResources(user.id), db.getTags(user.id), db.getStats(user.id)])
+      .then(([resources, tags, statsResult]) => {
+        if (cancelled) return;
+        setAllUserResources(resources);
+        setAvailableTags(tags);
+        setStats(statsResult);
+      })
+      .catch((err) => console.error('Failed to load Vault data', err))
+      .finally(() => {
+        if (!cancelled) setIsDataLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, dataVersion]);
+
+  // Filtered view: re-fetched whenever the active filters change (separately
+  // from the base data above, since it needs its own query).
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+
+    db.getResources(user.id, {
+      search: searchQuery || undefined,
+      type: currentView === 'favorites' ? 'All' : selectedType,
+      tagId: selectedTag ? availableTags.find((t) => t.name === selectedTag)?.id : undefined,
+      favoritesOnly: currentView === 'favorites' || favoritesOnly,
+      sort: sortOption,
+    })
+      .then((results) => {
+        if (!cancelled) setViewResources(results);
+      })
+      .catch((err) => console.error('Failed to load filtered resources', err));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, searchQuery, currentView, selectedType, selectedTag, favoritesOnly, sortOption, availableTags, dataVersion]);
+
+  const refresh = useCallback(() => setDataVersion((v) => v + 1), []);
 
   // Keyboard shortcut listeners (Cmd+K, N)
   useEffect(() => {
@@ -73,19 +135,13 @@ function VaultMain() {
     return <LandingPage onEnterApp={() => setCurrentView('dashboard')} />;
   }
 
-  // Fetch current user resources and tags
-  const allUserResources = db.getResources(user.id);
-  const availableTags = db.getTags(user.id);
-  const stats = db.getStats(user.id);
-
-  // Filtered resources for the current active view/filters
-  const viewResources = db.getResources(user.id, {
-    search: searchQuery || undefined,
-    type: currentView === 'favorites' ? 'All' : selectedType,
-    tagId: selectedTag ? availableTags.find((t) => t.name === selectedTag)?.id : undefined,
-    favoritesOnly: currentView === 'favorites' || favoritesOnly,
-    sort: sortOption,
-  });
+  if (isDataLoading) {
+    return (
+      <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center text-[#A1A1A1] font-mono text-xs">
+        Loading your resources...
+      </div>
+    );
+  }
 
   const notesList = allUserResources.filter((r) => r.type === 'Note');
   const snippetsList = allUserResources.filter((r) => r.type === 'Code Snippet');
@@ -110,7 +166,7 @@ function VaultMain() {
   };
 
   // CRUD handlers
-  const handleSaveResource = (
+  const handleSaveResource = async (
     data: {
       title: string;
       description?: string;
@@ -125,52 +181,76 @@ function VaultMain() {
     },
     tagNames: string[]
   ) => {
-    if (editingResource) {
-      db.updateResource(editingResource.id, user.id, data, tagNames);
-    } else {
-      db.createResource(user.id, data, tagNames);
-    }
-    setDataVersion((v) => v + 1);
-  };
-
-  const handleDeleteResource = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this resource?')) {
-      db.deleteResource(id, user.id);
-      if (detailResource?.id === id) {
-        setIsDetailModalOpen(false);
+    try {
+      if (editingResource) {
+        await db.updateResource(editingResource.id, user.id, data, tagNames);
+      } else {
+        await db.createResource(user.id, data, tagNames);
       }
-      setDataVersion((v) => v + 1);
+      refresh();
+    } catch (err) {
+      console.error('Failed to save resource', err);
     }
   };
 
-  const handleToggleFavorite = (id: string) => {
-    db.toggleFavorite(id, user.id);
-    if (detailResource?.id === id) {
-      const refreshed = db.getResource(id, user.id);
-      setDetailResource(refreshed);
+  const handleDeleteResource = async (id: string) => {
+    if (window.confirm('Are you sure you want to delete this resource?')) {
+      try {
+        await db.deleteResource(id, user.id);
+        if (detailResource?.id === id) {
+          setIsDetailModalOpen(false);
+        }
+        refresh();
+      } catch (err) {
+        console.error('Failed to delete resource', err);
+      }
     }
-    setDataVersion((v) => v + 1);
   };
 
-  const handleTogglePublic = (id: string) => {
-    db.togglePublic(id, user.id);
-    if (detailResource?.id === id) {
-      const refreshed = db.getResource(id, user.id);
-      setDetailResource(refreshed);
+  const handleToggleFavorite = async (id: string) => {
+    try {
+      await db.toggleFavorite(id, user.id);
+      if (detailResource?.id === id) {
+        const refreshed = await db.getResource(id, user.id);
+        setDetailResource(refreshed);
+      }
+      refresh();
+    } catch (err) {
+      console.error('Failed to toggle favorite', err);
     }
-    setDataVersion((v) => v + 1);
   };
 
-  const handleCreateTag = (name: string, color?: string) => {
-    db.createTag(user.id, name, color);
-    setDataVersion((v) => v + 1);
+  const handleTogglePublic = async (id: string) => {
+    try {
+      await db.togglePublic(id, user.id);
+      if (detailResource?.id === id) {
+        const refreshed = await db.getResource(id, user.id);
+        setDetailResource(refreshed);
+      }
+      refresh();
+    } catch (err) {
+      console.error('Failed to toggle public', err);
+    }
   };
 
-  const handleDeleteTag = (id: string) => {
+  const handleCreateTag = async (name: string, color?: string) => {
+    try {
+      await db.createTag(user.id, name, color);
+      refresh();
+    } catch (err) {
+      console.error('Failed to create tag', err);
+    }
+  };
+
+  const handleDeleteTag = async (id: string) => {
     if (window.confirm('Delete this tag? Associated resources will not be deleted.')) {
-      db.deleteTag(id, user.id);
-      if (selectedTag) setSelectedTag(undefined);
-      setDataVersion((v) => v + 1);
+      try {
+        await db.deleteTag(id, user.id);
+        if (selectedTag) setSelectedTag(undefined);
+        refresh();
+      } catch (err) {
+        console.error('Failed to delete tag', err);
+      }
     }
   };
 
@@ -366,6 +446,7 @@ function VaultMain() {
       <SchemaGuideModal
         isOpen={isSchemaGuideOpen}
         onClose={() => setIsSchemaGuideOpen(false)}
+        userId={user.id}
       />
     </div>
   );

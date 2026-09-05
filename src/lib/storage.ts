@@ -1,119 +1,144 @@
-import { Profile, Resource, ResourceTag, ResourceType, Tag } from '../types';
+import { supabase } from './supabaseClient';
+import { Profile, Resource, ResourceType, Tag } from '../types';
 
-const STORAGE_KEY = 'vault_app_db_v2';
-
-interface DatabaseState {
-  profiles: Profile[];
-  resources: Omit<Resource, 'tags'>[];
-  tags: Tag[];
-  resource_tags: ResourceTag[];
+interface ResourceRow extends Omit<Resource, 'tags'> {
+  resource_tags: { tags: Tag }[] | null;
 }
 
-const EMPTY_DATABASE: DatabaseState = {
-  profiles: [],
-  resources: [],
-  tags: [],
-  resource_tags: [],
-};
+function flattenResource(row: ResourceRow): Resource {
+  const { resource_tags, ...rest } = row;
+  return {
+    ...rest,
+    tags: (resource_tags ?? []).map((rt) => rt.tags).filter(Boolean),
+  };
+}
 
-function getRawDB(): DatabaseState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(EMPTY_DATABASE));
-      return {
-        profiles: [],
-        resources: [],
-        tags: [],
-        resource_tags: [],
-      };
-    }
-    return JSON.parse(raw);
-  } catch (err) {
-    console.error('Failed to parse database state from localStorage', err);
-    return {
-      profiles: [],
-      resources: [],
-      tags: [],
-      resource_tags: [],
-    };
+async function resolveTagIds(userId: string, tagNames: string[]): Promise<string[]> {
+  const clean = Array.from(new Set(tagNames.map((n) => n.trim()).filter(Boolean)));
+  if (clean.length === 0) return [];
+
+  const { data: existingTags, error: fetchErr } = await supabase
+    .from('tags')
+    .select('*')
+    .eq('user_id', userId)
+    .in('name', clean);
+  if (fetchErr) throw fetchErr;
+
+  const existingNames = new Set((existingTags ?? []).map((t) => t.name.toLowerCase()));
+  const toCreate = clean.filter((n) => !existingNames.has(n.toLowerCase()));
+
+  let createdTags: Tag[] = [];
+  if (toCreate.length > 0) {
+    const { data, error } = await supabase
+      .from('tags')
+      .insert(toCreate.map((name) => ({ user_id: userId, name })))
+      .select();
+    if (error) throw error;
+    createdTags = (data as Tag[]) || [];
+  }
+
+  return [...(existingTags ?? []), ...createdTags].map((t) => t.id);
+}
+
+async function setResourceTags(resourceId: string, userId: string, tagNames: string[]) {
+  const tagIds = await resolveTagIds(userId, tagNames);
+
+  const { error: deleteErr } = await supabase
+    .from('resource_tags')
+    .delete()
+    .eq('resource_id', resourceId);
+  if (deleteErr) throw deleteErr;
+
+  if (tagIds.length > 0) {
+    const { error: insertErr } = await supabase
+      .from('resource_tags')
+      .insert(tagIds.map((tag_id) => ({ resource_id: resourceId, tag_id })));
+    if (insertErr) throw insertErr;
   }
 }
 
-function saveRawDB(state: DatabaseState): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (err) {
-    console.error('Failed to save database state to localStorage', err);
-  }
-}
+const RESOURCE_SELECT = '*, resource_tags(tags(*))';
 
 export const db = {
   // Profiles
-  getProfile(userId: string): Profile | null {
-    const state = getRawDB();
-    const profile = state.profiles.find((p) => p.id === userId);
-    return profile || null;
+  async getProfile(userId: string): Promise<Profile | null> {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
   },
 
-  upsertProfile(profile: Profile): void {
-    const state = getRawDB();
-    const idx = state.profiles.findIndex((p) => p.id === profile.id);
-    if (idx >= 0) {
-      state.profiles[idx] = { ...state.profiles[idx], ...profile };
-    } else {
-      state.profiles.push(profile);
-    }
-    saveRawDB(state);
+  async getProfileByEmail(email: string): Promise<Profile | null> {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('email', email)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  },
+
+  async upsertProfile(profile: Profile): Promise<void> {
+    const { error } = await supabase.from('profiles').upsert(profile);
+    if (error) throw error;
   },
 
   // Tags
-  getTags(userId: string): (Tag & { count: number })[] {
-    const state = getRawDB();
-    const userTags = state.tags.filter((t) => t.user_id === userId);
-    const userResourceIds = new Set(
-      state.resources.filter((r) => r.user_id === userId).map((r) => r.id)
-    );
+  async getTags(userId: string): Promise<(Tag & { count: number })[]> {
+    const { data: tags, error } = await supabase
+      .from('tags')
+      .select('*')
+      .eq('user_id', userId)
+      .order('name');
+    if (error) throw error;
 
-    return userTags.map((tag) => {
-      const count = state.resource_tags.filter(
-        (rt) => rt.tag_id === tag.id && userResourceIds.has(rt.resource_id)
-      ).length;
-      return { ...tag, count };
+    const { data: counts, error: countErr } = await supabase
+      .from('resource_tags')
+      .select('tag_id, resources!inner(user_id)')
+      .eq('resources.user_id', userId);
+    if (countErr) throw countErr;
+
+    const countByTag = new Map<string, number>();
+    (counts ?? []).forEach((row: { tag_id: string }) => {
+      countByTag.set(row.tag_id, (countByTag.get(row.tag_id) ?? 0) + 1);
     });
+
+    return (tags ?? []).map((tag) => ({ ...tag, count: countByTag.get(tag.id) ?? 0 }));
   },
 
-  createTag(userId: string, name: string, color?: string): Tag {
-    const state = getRawDB();
+  async createTag(userId: string, name: string, color?: string): Promise<Tag> {
     const trimmed = name.trim();
-    const existing = state.tags.find(
-      (t) => t.user_id === userId && t.name.toLowerCase() === trimmed.toLowerCase()
-    );
-    if (existing) {
-      return existing;
-    }
+    const { data: existing } = await supabase
+      .from('tags')
+      .select('*')
+      .eq('user_id', userId)
+      .ilike('name', trimmed)
+      .maybeSingle();
+    if (existing) return existing;
 
-    const newTag: Tag = {
-      id: `tag_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      user_id: userId,
-      name: trimmed,
-      color: color || '#64748b',
-      created_at: new Date().toISOString(),
-    };
-    state.tags.push(newTag);
-    saveRawDB(state);
-    return newTag;
+    const { data, error } = await supabase
+      .from('tags')
+      .insert({ user_id: userId, name: trimmed, color: color || '#64748b' })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
   },
 
-  deleteTag(tagId: string, userId: string): void {
-    const state = getRawDB();
-    state.tags = state.tags.filter((t) => !(t.id === tagId && t.user_id === userId));
-    state.resource_tags = state.resource_tags.filter((rt) => rt.tag_id !== tagId);
-    saveRawDB(state);
+  async deleteTag(tagId: string, userId: string): Promise<void> {
+    const { error } = await supabase
+      .from('tags')
+      .delete()
+      .eq('id', tagId)
+      .eq('user_id', userId);
+    if (error) throw error;
   },
 
   // Resources
-  getResources(
+  async getResources(
     userId: string,
     options?: {
       search?: string;
@@ -122,91 +147,58 @@ export const db = {
       favoritesOnly?: boolean;
       sort?: 'newest' | 'oldest' | 'title' | 'updated';
     }
-  ): Resource[] {
-    const state = getRawDB();
-    let userResources = state.resources.filter((r) => r.user_id === userId);
+  ): Promise<Resource[]> {
+    let query = supabase.from('resources').select(RESOURCE_SELECT).eq('user_id', userId);
 
     if (options?.favoritesOnly) {
-      userResources = userResources.filter((r) => r.is_favorite);
+      query = query.eq('is_favorite', true);
+    }
+    if (options?.type && options.type !== 'All') {
+      query = query.eq('type', options.type);
+    }
+    if (options?.search) {
+      const q = options.search.trim();
+      query = query.or(
+        `title.ilike.%${q}%,description.ilike.%${q}%,content.ilike.%${q}%,url.ilike.%${q}%`
+      );
     }
 
-    if (options?.type && options.type !== 'All') {
-      userResources = userResources.filter((r) => r.type === options.type);
+    switch (options?.sort) {
+      case 'oldest':
+        query = query.order('created_at', { ascending: true });
+        break;
+      case 'title':
+        query = query.order('title', { ascending: true });
+        break;
+      case 'updated':
+        query = query.order('updated_at', { ascending: false });
+        break;
+      default:
+        query = query.order('created_at', { ascending: false });
     }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    let results = ((data as ResourceRow[]) || []).map(flattenResource);
 
     if (options?.tagId) {
-      const taggedResourceIds = new Set(
-        state.resource_tags
-          .filter((rt) => rt.tag_id === options.tagId)
-          .map((rt) => rt.resource_id)
-      );
-      userResources = userResources.filter((r) => taggedResourceIds.has(r.id));
+      results = results.filter((r) => r.tags?.some((t) => t.id === options.tagId));
     }
-
-    if (options?.search) {
-      const q = options.search.toLowerCase().trim();
-      userResources = userResources.filter((r) => {
-        const inTitle = r.title.toLowerCase().includes(q);
-        const inDesc = r.description?.toLowerCase().includes(q) || false;
-        const inContent = r.content?.toLowerCase().includes(q) || false;
-        const inUrl = r.url?.toLowerCase().includes(q) || false;
-
-        // Also check if any associated tag matches
-        const resTags = state.resource_tags
-          .filter((rt) => rt.resource_id === r.id)
-          .map((rt) => state.tags.find((t) => t.id === rt.tag_id)?.name.toLowerCase())
-          .filter(Boolean);
-        const inTags = resTags.some((tag) => tag && tag.includes(q));
-
-        return inTitle || inDesc || inContent || inUrl || inTags;
-      });
-    }
-
-    // Sort
-    userResources.sort((a, b) => {
-      if (options?.sort === 'oldest') {
-        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-      }
-      if (options?.sort === 'title') {
-        return a.title.localeCompare(b.title);
-      }
-      if (options?.sort === 'updated') {
-        return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-      }
-      // Default newest
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-    });
-
-    // Populate tags for each resource
-    return userResources.map((r) => {
-      const tagIds = state.resource_tags
-        .filter((rt) => rt.resource_id === r.id)
-        .map((rt) => rt.tag_id);
-      const tags = state.tags.filter((t) => tagIds.includes(t.id));
-      return {
-        ...r,
-        tags,
-      };
-    });
+    return results;
   },
 
-  getResource(id: string, userId: string): Resource | null {
-    const state = getRawDB();
-    const item = state.resources.find((r) => r.id === id && (r.user_id === userId || r.is_public));
-    if (!item) return null;
-
-    const tagIds = state.resource_tags
-      .filter((rt) => rt.resource_id === item.id)
-      .map((rt) => rt.tag_id);
-    const tags = state.tags.filter((t) => tagIds.includes(t.id));
-
-    return {
-      ...item,
-      tags,
-    };
+  async getResource(id: string, userId: string): Promise<Resource | null> {
+    const { data, error } = await supabase
+      .from('resources')
+      .select(RESOURCE_SELECT)
+      .eq('id', id)
+      .or(`user_id.eq.${userId},is_public.eq.true`)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? flattenResource(data as ResourceRow) : null;
   },
 
-  createResource(
+  async createResource(
     userId: string,
     data: {
       title: string;
@@ -221,181 +213,148 @@ export const db = {
       created_at?: string;
     },
     tagNames: string[] = []
-  ): Resource {
-    const state = getRawDB();
-    const now = new Date().toISOString();
-    const entryDate = data.created_at || now;
-    const newId = `res_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  ): Promise<Resource> {
+    const { data: created, error } = await supabase
+      .from('resources')
+      .insert({
+        user_id: userId,
+        title: data.title.trim(),
+        description: data.description?.trim() || null,
+        url: data.url?.trim() || null,
+        type: data.type,
+        content: data.content?.trim() || null,
+        language: data.language || null,
+        mood: data.mood?.trim() || null,
+        is_favorite: data.is_favorite ?? false,
+        is_public: data.is_public ?? false,
+        ...(data.created_at ? { created_at: data.created_at } : {}),
+      })
+      .select()
+      .single();
+    if (error) throw error;
 
-    const newResource: Omit<Resource, 'tags'> = {
-      id: newId,
-      user_id: userId,
-      title: data.title.trim(),
-      description: data.description?.trim() || undefined,
-      url: data.url?.trim() || undefined,
-      type: data.type,
-      content: data.content?.trim() || undefined,
-      language: data.language || undefined,
-      mood: data.mood?.trim() || undefined,
-      is_favorite: data.is_favorite ?? false,
-      is_public: data.is_public ?? false,
-      created_at: entryDate,
-      updated_at: now,
-    };
-
-    state.resources.unshift(newResource);
-
-    // Process tags
-    const attachedTags: Tag[] = [];
-    for (const name of tagNames) {
-      const clean = name.trim();
-      if (!clean) continue;
-      let existingTag = state.tags.find(
-        (t) => t.user_id === userId && t.name.toLowerCase() === clean.toLowerCase()
-      );
-      if (!existingTag) {
-        existingTag = {
-          id: `tag_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          user_id: userId,
-          name: clean,
-          created_at: now,
-        };
-        state.tags.push(existingTag);
-      }
-      state.resource_tags.push({ resource_id: newId, tag_id: existingTag.id });
-      attachedTags.push(existingTag);
+    if (tagNames.length > 0) {
+      await setResourceTags(created.id, userId, tagNames);
     }
 
-    saveRawDB(state);
-    return { ...newResource, tags: attachedTags };
+    const full = await this.getResource(created.id, userId);
+    return full as Resource;
   },
 
-  updateResource(
+  async updateResource(
     id: string,
     userId: string,
     data: Partial<Omit<Resource, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'tags'>>,
     tagNames?: string[]
-  ): Resource | null {
-    const state = getRawDB();
-    const idx = state.resources.findIndex((r) => r.id === id && r.user_id === userId);
-    if (idx === -1) return null;
-
-    const now = new Date().toISOString();
-    state.resources[idx] = {
-      ...state.resources[idx],
-      ...data,
-      updated_at: now,
-    };
+  ): Promise<Resource | null> {
+    const { error } = await supabase
+      .from('resources')
+      .update({ ...data, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', userId);
+    if (error) throw error;
 
     if (tagNames !== undefined) {
-      // Clear existing resource_tags
-      state.resource_tags = state.resource_tags.filter((rt) => rt.resource_id !== id);
-      // Re-add
-      for (const name of tagNames) {
-        const clean = name.trim();
-        if (!clean) continue;
-        let existingTag = state.tags.find(
-          (t) => t.user_id === userId && t.name.toLowerCase() === clean.toLowerCase()
-        );
-        if (!existingTag) {
-          existingTag = {
-            id: `tag_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-            user_id: userId,
-            name: clean,
-            created_at: now,
-          };
-          state.tags.push(existingTag);
-        }
-        state.resource_tags.push({ resource_id: id, tag_id: existingTag.id });
-      }
+      await setResourceTags(id, userId, tagNames);
     }
 
-    saveRawDB(state);
     return this.getResource(id, userId);
   },
 
-  deleteResource(id: string, userId: string): boolean {
-    const state = getRawDB();
-    const initialLen = state.resources.length;
-    state.resources = state.resources.filter((r) => !(r.id === id && r.user_id === userId));
-    state.resource_tags = state.resource_tags.filter((rt) => rt.resource_id !== id);
-    saveRawDB(state);
-    return state.resources.length < initialLen;
+  async deleteResource(id: string, userId: string): Promise<boolean> {
+    const { error, count } = await supabase
+      .from('resources')
+      .delete({ count: 'exact' })
+      .eq('id', id)
+      .eq('user_id', userId);
+    if (error) throw error;
+    return (count ?? 0) > 0;
   },
 
-  toggleFavorite(id: string, userId: string): boolean {
-    const state = getRawDB();
-    const resource = state.resources.find((r) => r.id === id && r.user_id === userId);
-    if (!resource) return false;
-    resource.is_favorite = !resource.is_favorite;
-    resource.updated_at = new Date().toISOString();
-    saveRawDB(state);
-    return resource.is_favorite;
+  async toggleFavorite(id: string, userId: string): Promise<boolean> {
+    const current = await this.getResource(id, userId);
+    if (!current) return false;
+    const next = !current.is_favorite;
+
+    const { error } = await supabase
+      .from('resources')
+      .update({ is_favorite: next, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', userId);
+    if (error) throw error;
+    return next;
   },
 
-  togglePublic(id: string, userId: string): boolean {
-    const state = getRawDB();
-    const resource = state.resources.find((r) => r.id === id && r.user_id === userId);
-    if (!resource) return false;
-    resource.is_public = !resource.is_public;
-    resource.updated_at = new Date().toISOString();
-    saveRawDB(state);
-    return resource.is_public;
+  async togglePublic(id: string, userId: string): Promise<boolean> {
+    const current = await this.getResource(id, userId);
+    if (!current) return false;
+    const next = !current.is_public;
+
+    const { error } = await supabase
+      .from('resources')
+      .update({ is_public: next, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', userId);
+    if (error) throw error;
+    return next;
   },
 
-  getStats(userId: string) {
-    const state = getRawDB();
-    const userResources = state.resources.filter((r) => r.user_id === userId);
-    const snippets = userResources.filter((r) => r.type === 'Code Snippet').length;
-    const notes = userResources.filter((r) => r.type === 'Note').length;
-    const diary = userResources.filter((r) => r.type === 'Diary').length;
-    const bookmarks = userResources.filter((r) => r.type === 'Bookmark' || r.type === 'Article' || r.type === 'Documentation').length;
-    const favorites = userResources.filter((r) => r.is_favorite).length;
-    const tagsCount = state.tags.filter((t) => t.user_id === userId).length;
+  async getStats(userId: string) {
+    const resources = await this.getResources(userId);
+    const tags = await this.getTags(userId);
+    const snippets = resources.filter((r) => r.type === 'Code Snippet').length;
+    const notes = resources.filter((r) => r.type === 'Note').length;
+    const diary = resources.filter((r) => r.type === 'Diary').length;
+    const bookmarks = resources.filter((r) =>
+      ['Bookmark', 'Article', 'Documentation'].includes(r.type)
+    ).length;
+    const favorites = resources.filter((r) => r.is_favorite).length;
 
     return {
-      totalResources: userResources.length,
+      totalResources: resources.length,
       totalSnippets: snippets,
       totalNotes: notes,
       totalDiary: diary,
       totalBookmarks: bookmarks,
       totalFavorites: favorites,
-      totalTags: tagsCount,
+      totalTags: tags.length,
     };
   },
 
-  resetDefaults(userId: string) {
-    const state = getRawDB();
-    state.resources = state.resources.filter((r) => r.user_id !== userId);
-    state.tags = state.tags.filter((t) => t.user_id !== userId);
-    const remainingIds = new Set(state.resources.map((r) => r.id));
-    state.resource_tags = state.resource_tags.filter((rt) => remainingIds.has(rt.resource_id));
-    saveRawDB(state);
+  async resetDefaults(userId: string): Promise<void> {
+    const { error: resErr } = await supabase.from('resources').delete().eq('user_id', userId);
+    if (resErr) throw resErr;
+    const { error: tagErr } = await supabase.from('tags').delete().eq('user_id', userId);
+    if (tagErr) throw tagErr;
   },
 
-  exportDatabase(userId: string): string {
-    const state = getRawDB();
-    const userResources = this.getResources(userId);
-    const userTags = this.getTags(userId);
-    const profile = this.getProfile(userId);
+  async exportDatabase(userId: string): Promise<string> {
+    const resources = await this.getResources(userId);
+    const tags = await this.getTags(userId);
+    const profile = await this.getProfile(userId);
 
     const payload = {
       exportVersion: '1.0',
       exportedAt: new Date().toISOString(),
       profile,
-      tags: userTags,
-      resources: userResources,
+      tags,
+      resources,
     };
     return JSON.stringify(payload, null, 2);
   },
 
-  // Raw database tables for the educational Database Inspector
-  getRawTables() {
-    return getRawDB();
+  // Read-only snapshot of live rows for Live Table Inspector
+  async getLiveSnapshot(userId: string) {
+    const resources = await this.getResources(userId);
+    const tags = await this.getTags(userId);
+    const resourceTags = resources.flatMap(
+      (r) => r.tags?.map((t) => ({ resource_id: r.id, tag_id: t.id })) ?? []
+    );
+    return { resources, tags, resource_tags: resourceTags };
   },
 };
 
-// PostgreSQL Schema & RLS Educational Blueprint
+// PostgreSQL Schema & RLS Blueprint
 export const POSTGRES_SCHEMA_SQL = `-- VAULT: PostgreSQL & Supabase Database Schema DDL
 -- Execute in Supabase SQL Editor
 
@@ -431,6 +390,7 @@ CREATE TABLE IF NOT EXISTS public.tags (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   name TEXT NOT NULL,
+  color TEXT DEFAULT '#64748b',
   created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
   UNIQUE(user_id, name)
 );
@@ -442,20 +402,23 @@ CREATE TABLE IF NOT EXISTS public.resource_tags (
   PRIMARY KEY (resource_id, tag_id)
 );
 
--- 5. Row Level Security (RLS) Policies (Supabase)
+-- 5. Row Level Security (RLS) Policies (Supabase Auth)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.resources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tags ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.resource_tags ENABLE ROW LEVEL SECURITY;
 
--- Profile Policies:
+-- Profile Policies
 CREATE POLICY "Users can view own profile or public profiles"
   ON public.profiles FOR SELECT USING (true);
+
+CREATE POLICY "Users can insert own profile"
+  ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
 
 CREATE POLICY "Users can update own profile"
   ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
--- Resource Policies:
+-- Resource Policies
 CREATE POLICY "Users can read own resources or public resources"
   ON public.resources FOR SELECT
   USING (auth.uid() = user_id OR is_public = true);
@@ -472,12 +435,12 @@ CREATE POLICY "Users can delete own resources"
   ON public.resources FOR DELETE
   USING (auth.uid() = user_id);
 
--- Tags Policies:
+-- Tags Policies
 CREATE POLICY "Users can manage own tags"
   ON public.tags FOR ALL
   USING (auth.uid() = user_id);
 
--- Resource Tags Policies:
+-- Resource Tags Policies
 CREATE POLICY "Users can manage own resource tags"
   ON public.resource_tags FOR ALL
   USING (
