@@ -19,7 +19,7 @@ interface ResourceModalProps {
       is_public?: boolean;
     },
     tagNames: string[]
-  ) => void;
+  ) => Promise<void> | void;
   initialData?: Resource | null;
   availableTags: (Tag & { count: number })[];
   defaultType?: ResourceType;
@@ -82,6 +82,8 @@ export const ResourceModal: React.FC<ResourceModalProps> = ({
   const [tagInput, setTagInput] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [errors, setErrors] = useState<{ title?: string; url?: string }>({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialData) {
@@ -114,6 +116,7 @@ export const ResourceModal: React.FC<ResourceModalProps> = ({
       setSelectedTags(defaultType === 'Diary' ? ['daily', 'reflection'] : []);
     }
     setErrors({});
+    setSaveError(null);
     setTagInput('');
   }, [initialData, isOpen, defaultType]);
 
@@ -147,7 +150,7 @@ export const ResourceModal: React.FC<ResourceModalProps> = ({
     setSelectedTags(selectedTags.filter((t) => t !== tagName));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const newErrors: { title?: string; url?: string } = {};
 
@@ -170,22 +173,34 @@ export const ResourceModal: React.FC<ResourceModalProps> = ({
       formattedUrl = `https://${formattedUrl}`;
     }
 
-    onSave(
-      {
-        title: title.trim(),
-        description: description.trim() || undefined,
-        url: formattedUrl || undefined,
-        type,
-        content: content.trim() || undefined,
-        language: type === 'Code Snippet' ? language : undefined,
-        mood: type === 'Diary' ? mood : undefined,
-        created_at: type === 'Diary' && entryDate ? new Date(entryDate).toISOString() : undefined,
-        is_favorite: isFavorite,
-        is_public: isPublic,
-      },
-      selectedTags
-    );
-    onClose();
+    try {
+      setIsSaving(true);
+      setSaveError(null);
+      await onSave(
+        {
+          title: title.trim(),
+          description: description.trim() || undefined,
+          url: formattedUrl || undefined,
+          type,
+          content: content.trim() || undefined,
+          language: type === 'Code Snippet' ? language : undefined,
+          mood: type === 'Diary' ? mood : undefined,
+          created_at: type === 'Diary' && entryDate ? new Date(entryDate).toISOString() : undefined,
+          is_favorite: isFavorite,
+          is_public: isPublic,
+        },
+        selectedTags
+      );
+      onClose();
+    } catch (err: any) {
+      console.error('Failed to save resource in modal:', err);
+      setSaveError(
+        err?.message ||
+        (typeof err === 'string' ? err : 'Failed to save resource. Please verify database permissions and schema.')
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -500,27 +515,42 @@ export const ResourceModal: React.FC<ResourceModalProps> = ({
             </label>
           </div>
 
+          {/* Error Message Banner */}
+          {saveError && (
+            <div className="p-3 rounded-lg bg-red-950/40 border border-red-800/80 text-xs text-red-200 flex items-start gap-2 animate-in fade-in duration-150">
+              <span className="font-bold text-red-400 shrink-0">⚠️ Error:</span>
+              <span className="flex-1 break-words">{saveError}</span>
+            </div>
+          )}
+
           {/* Footer actions */}
           <div className="pt-4 flex items-center justify-end gap-3 border-t border-[#262626]">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-medium text-[#888] hover:text-white rounded hover:bg-[#1A1A1A] transition-colors"
+              disabled={isSaving}
+              className="px-4 py-2 text-xs font-medium text-[#888] hover:text-white rounded hover:bg-[#1A1A1A] transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               id="submit-resource-btn"
               type="submit"
-              className="px-5 py-2 text-xs font-bold bg-white text-black hover:bg-[#E5E5E5] rounded transition-all shadow-md"
+              disabled={isSaving}
+              className="px-5 py-2 text-xs font-bold bg-white text-black hover:bg-[#E5E5E5] disabled:opacity-60 disabled:cursor-not-allowed rounded transition-all shadow-md flex items-center gap-2"
             >
-              {type === 'Diary'
-                ? initialData
-                  ? 'Save Diary Entry'
-                  : 'Record Diary Entry'
-                : initialData
-                ? 'Save Changes'
-                : 'Create Resource'}
+              {isSaving ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                  <span>Saving...</span>
+                </>
+              ) : type === 'Diary' ? (
+                initialData ? 'Save Diary Entry' : 'Record Diary Entry'
+              ) : initialData ? (
+                'Save Changes'
+              ) : (
+                'Create Resource'
+              )}
             </button>
           </div>
         </form>

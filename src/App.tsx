@@ -190,6 +190,7 @@ function VaultMain() {
       refresh();
     } catch (err) {
       console.error('Failed to save resource', err);
+      throw err;
     }
   };
 
