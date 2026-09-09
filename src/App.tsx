@@ -11,7 +11,7 @@ import { Navbar } from './components/Navbar';
 import { NotesView } from './components/NotesView';
 import { ResourceDetailModal } from './components/ResourceDetailModal';
 import { ResourceModal } from './components/ResourceModal';
-import { SchemaGuideModal } from './components/SchemaGuideModal';
+
 import { Sidebar } from './components/Sidebar';
 import { TagsView } from './components/TagsView';
 import { AuthProvider, useAuth } from './lib/auth';
@@ -36,7 +36,7 @@ function VaultMain() {
   const [detailResource, setDetailResource] = useState<Resource | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-  const [isSchemaGuideOpen, setIsSchemaGuideOpen] = useState(false);
+
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Remote data state — replaces the old synchronous localStorage reads.
@@ -268,7 +268,7 @@ function VaultMain() {
         selectedTag={selectedTag}
         onSelectTag={(tagName) => setSelectedTag(tagName)}
         onOpenCreateModal={() => handleOpenCreateModal()}
-        onOpenSchemaGuide={() => setIsSchemaGuideOpen(true)}
+
         isOpenMobile={isMobileMenuOpen}
         onCloseMobile={() => setIsMobileMenuOpen(false)}
         totalCounts={{
@@ -289,7 +289,7 @@ function VaultMain() {
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
           onOpenCreateModal={() => handleOpenCreateModal()}
           onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
-          onOpenSchemaGuide={() => setIsSchemaGuideOpen(true)}
+
           selectedTag={selectedTag}
           onClearSelectedTag={() => setSelectedTag(undefined)}
           searchQuery={searchQuery}
@@ -308,7 +308,7 @@ function VaultMain() {
               onToggleFavorite={handleToggleFavorite}
               onNavigate={setCurrentView}
               onOpenCreateModal={handleOpenCreateModal}
-              onOpenSchemaGuide={() => setIsSchemaGuideOpen(true)}
+
               onTagClick={(tagName) => {
                 setSelectedTag(tagName);
                 setCurrentView('all');
@@ -388,17 +388,7 @@ function VaultMain() {
             />
           )}
 
-          {currentView === 'schema-guide' && (
-            <div className="p-4 sm:p-8 max-w-5xl mx-auto">
-              {/* Trigger the modal and return to dashboard */}
-              <button
-                onClick={() => setIsSchemaGuideOpen(true)}
-                className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold"
-              >
-                Open Schema Guide
-              </button>
-            </div>
-          )}
+
         </main>
       </div>
 
@@ -433,22 +423,11 @@ function VaultMain() {
         onClose={() => setIsCommandPaletteOpen(false)}
         resources={allUserResources}
         onSelectResource={handleOpenDetails}
-        onNavigate={(view) => {
-          if (view === 'schema-guide') {
-            setIsSchemaGuideOpen(true);
-          } else {
-            setCurrentView(view);
-          }
-        }}
+        onNavigate={setCurrentView}
         onOpenCreateModal={handleOpenCreateModal}
       />
 
-      {/* Database Schema & RLS Educational Blueprint Modal */}
-      <SchemaGuideModal
-        isOpen={isSchemaGuideOpen}
-        onClose={() => setIsSchemaGuideOpen(false)}
-        userId={user.id}
-      />
+
     </div>
   );
 }

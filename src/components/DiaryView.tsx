@@ -132,7 +132,7 @@ export const DiaryView: React.FC<DiaryViewProps> = ({
                 </span>
               </div>
               <p className="text-xs text-[#666]">
-                Private daily reflections, milestones, and personal thoughts with Row Level Security
+                Private daily reflections, milestones, and personal thoughts
               </p>
             </div>
           </div>

@@ -3,7 +3,6 @@ import {
   ArrowRight,
   BookOpen,
   Code2,
-  Database,
   Layers,
   Plus,
   StickyNote,
@@ -29,7 +28,7 @@ interface DashboardViewProps {
   onToggleFavorite: (id: string) => void;
   onNavigate: (view: ViewMode) => void;
   onOpenCreateModal: (type?: ResourceType) => void;
-  onOpenSchemaGuide: () => void;
+
   onTagClick?: (tagName: string) => void;
 }
 
@@ -42,7 +41,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onToggleFavorite,
   onNavigate,
   onOpenCreateModal,
-  onOpenSchemaGuide,
+
   onTagClick,
 }) => {
   return (
@@ -164,27 +163,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Educational Learning Blueprint Banner */}
-      <div className="p-5 rounded-xl border border-[#262626] bg-[#111] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Database className="w-4 h-4 text-[#888]" />
-            <h3 className="text-sm font-semibold text-white">
-              PostgreSQL Schema & Row Level Security (RLS)
-            </h3>
-          </div>
-          <p className="text-xs text-[#A1A1A1] max-w-2xl leading-relaxed">
-            Vault models relational persistence (<code>profiles</code>, <code>resources</code>, <code>tags</code>, and <code>resource_tags</code>) with strict tenant authorization policies ready for Supabase production.
-          </p>
-        </div>
-        <button
-          onClick={onOpenSchemaGuide}
-          className="px-3.5 py-1.5 rounded text-xs font-mono bg-[#1A1A1A] hover:bg-[#222] text-[#EDEDED] hover:text-white border border-[#333] transition-colors shrink-0 flex items-center gap-1.5"
-        >
-          <span>View SQL DDL & Policies</span>
-          <ArrowRight className="w-3.5 h-3.5" />
-        </button>
-      </div>
+
 
       {/* Recent Resources Section */}
       <div className="space-y-4">

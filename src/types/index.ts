@@ -58,7 +58,6 @@ export type ViewMode =
   | 'diary'
   | 'tags'
   | 'profile'
-  | 'settings'
-  | 'schema-guide';
+  | 'settings';
 
 export type SortOption = 'newest' | 'oldest' | 'title' | 'updated';

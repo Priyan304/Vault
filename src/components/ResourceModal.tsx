@@ -223,7 +223,7 @@ export const ResourceModal: React.FC<ResourceModalProps> = ({
             </h2>
             <p className="text-xs text-[#666]">
               {type === 'Diary'
-                ? 'Private personal reflection recorded with Row Level Security'
+                ? 'Private personal reflection — only visible to you'
                 : 'Add links, notes, or code snippets to your private vault'}
             </p>
           </div>
@@ -326,7 +326,7 @@ export const ResourceModal: React.FC<ResourceModalProps> = ({
                   className="w-full px-3 py-1.5 rounded-lg border border-[#262626] bg-[#141414] text-xs text-[#EDEDED] font-mono focus:outline-none focus:border-[#444]"
                 />
                 <p className="mt-1 text-[10px] text-[#666]">
-                  Entries are stored with strict Row Level Security (RLS)
+                  Entries are private and only visible to you
                 </p>
               </div>
             </div>

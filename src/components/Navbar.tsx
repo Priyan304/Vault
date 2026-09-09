@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Database,
   Menu,
   Plus,
   Search,
@@ -13,7 +12,7 @@ interface NavbarProps {
   onOpenCommandPalette: () => void;
   onOpenCreateModal: () => void;
   onOpenMobileMenu: () => void;
-  onOpenSchemaGuide: () => void;
+
   selectedTag?: string;
   onClearSelectedTag: () => void;
   searchQuery: string;
@@ -25,7 +24,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenCommandPalette,
   onOpenCreateModal,
   onOpenMobileMenu,
-  onOpenSchemaGuide,
+
   selectedTag,
   onClearSelectedTag,
   searchQuery,
@@ -102,15 +101,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </span>
         </div>
 
-        {/* Database Architecture Blueprint shortcut */}
-        <button
-          onClick={onOpenSchemaGuide}
-          className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-[#A1A1A1] hover:text-white bg-[#111] hover:bg-[#1A1A1A] border border-[#262626] transition-colors shrink-0"
-          title="Inspect PostgreSQL Schema & RLS"
-        >
-          <Database className="w-3.5 h-3.5 text-[#888]" />
-          <span>Schema</span>
-        </button>
+
 
         {/* New Resource button */}
         <button

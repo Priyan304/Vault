@@ -2,7 +2,6 @@ import React from 'react';
 import {
   BookOpen,
   Code2,
-  Database,
   LayoutDashboard,
   Layers,
   LogOut,
@@ -22,7 +21,7 @@ interface SidebarProps {
   selectedTag?: string;
   onSelectTag: (tagName?: string) => void;
   onOpenCreateModal: () => void;
-  onOpenSchemaGuide: () => void;
+
   isOpenMobile: boolean;
   onCloseMobile: () => void;
   totalCounts: {
@@ -42,7 +41,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   selectedTag,
   onSelectTag,
   onOpenCreateModal,
-  onOpenSchemaGuide,
+
   isOpenMobile,
   onCloseMobile,
   totalCounts,
@@ -211,17 +210,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Bottom Section: Learning Guide & User Switcher */}
         <div className="pt-4 border-t border-[#262626] space-y-3">
-          {/* Database Architecture Learning Button */}
-          <button
-            onClick={onOpenSchemaGuide}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-mono text-[#A1A1A1] hover:text-white bg-[#111] hover:bg-[#151515] border border-[#262626] hover:border-[#333] transition-colors"
-          >
-            <div className="flex items-center gap-2">
-              <Database className="w-3.5 h-3.5 text-[#666]" />
-              <span>Schema & RLS Guide</span>
-            </div>
-            <span className="text-[10px] font-mono px-1 rounded bg-[#1A1A1A] text-[#888] border border-[#333]">SQL</span>
-          </button>
 
           {/* User Profile / Switch */}
           {user && (

@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   BookOpen,
   Code2,
-  Database,
   Plus,
   Search,
   Star,
@@ -107,12 +106,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       label: 'Browse Tags Catalog',
       icon: TagIcon,
       action: () => onNavigate('tags'),
-    },
-    {
-      id: 'nav-schema',
-      label: 'Database Schema & RLS Blueprint',
-      icon: Database,
-      action: () => onNavigate('schema-guide'),
     },
   ];
 
